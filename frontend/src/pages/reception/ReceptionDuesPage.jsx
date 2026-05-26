@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUser, faPhone, faClock, faMoneyBillWave, faCheckCircle, faSearch, faReceipt } from '@fortawesome/free-solid-svg-icons';
 import PageHeader from '../../components/common/PageHeader';
@@ -169,6 +169,10 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
     g.phone?.includes(search)
   );
 
+  const totalDues = useMemo(() => {
+    return guests.reduce((sum, g) => sum + (Number(g.totalDue) || 0), 0);
+  }, [guests]);
+
   const openPayment = (guest) => {
     setActiveGuest(guest);
     setPaymentAmount(guest.totalDue);
@@ -263,13 +267,21 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
       <PageHeader
         title="Dues Management"
         subtitle="Manage & collect outstanding guest balances"
-        actions={
-          <div className="relative w-full sm:w-80">
-            <FontAwesomeIcon icon={faSearch} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-muted" />
-            <input className="input !pl-11" placeholder="Search by guest name..." value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-        }
       />
+
+      <div className="mb-6 grid gap-4 md:grid-cols-3">
+        <div className="card p-5 border-l-4 border-l-rose-500 shadow-sm md:col-span-1 flex flex-col justify-center bg-gradient-to-br from-white to-rose-50/10">
+          <p className="text-[12px] font-bold uppercase tracking-wider text-brand-muted">Total Dues to be Collected</p>
+          <h3 className="mt-2 text-[26px] font-black text-rose-600 tracking-tight">Rs. {totalDues.toLocaleString()}</h3>
+        </div>
+        <div className="card p-5 border-l-4 border-l-brand-blue shadow-sm md:col-span-2 flex flex-col justify-center">
+          <label className="text-[12px] font-bold uppercase tracking-wider text-brand-muted mb-2">Search Guest</label>
+          <div className="relative w-full">
+            <FontAwesomeIcon icon={faSearch} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-muted" />
+            <input className="input !pl-11 !h-11 font-semibold" placeholder="Search by guest name or phone..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+        </div>
+      </div>
 
       {loading ? (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -352,7 +364,7 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
       )}
 
       {/* Payment Modal */}
-      <Modal open={!!activeGuest} title="Process Due Payment" onClose={() => !submitting && setActiveGuest(null)} width="440px">
+      <Modal open={!!activeGuest} title="Process Due Payment" onClose={() => !submitting && setActiveGuest(null)} width="480px">
         <div className="relative">
           {submitting && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-2xl bg-white/70 backdrop-blur-sm">
@@ -360,11 +372,51 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
               <p className="text-[13px] font-bold text-brand-muted uppercase tracking-widest">Processing Payment...</p>
             </div>
           )}
-          <form className={`space-y-6 transition-all duration-200 ${submitting ? 'pointer-events-none blur-[2px]' : ''}`} onSubmit={handlePayment}>
+          <form className={`space-y-5 transition-all duration-200 ${submitting ? 'pointer-events-none blur-[2px]' : ''}`} onSubmit={handlePayment}>
+            {/* Guest summary */}
             <div className="bg-rose-50 rounded-2xl p-5 border border-rose-100 text-center">
-                <p className="text-[11px] font-black text-rose-400 uppercase tracking-widest mb-1">Total Outstanding</p>
+                <p className="text-[11px] font-black text-rose-400 uppercase tracking-widest mb-1">Guest: {activeGuest?.name}</p>
+                <p className="text-[11px] font-bold text-rose-400 mb-2">Total Outstanding</p>
                 <p className="text-[32px] font-black text-rose-600 tracking-tight">Rs. {activeGuest?.totalDue?.toLocaleString()}</p>
             </div>
+
+            {/* Itemized breakdown */}
+            {(activeGuest?.pendingBills?.length > 0 || activeGuest?.pendingOrders?.length > 0) && (
+              <div className="rounded-xl border border-dashed border-brand-border bg-slate-50 p-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-brand-muted mb-3">Due Breakdown</p>
+                <div className="space-y-2">
+                  {activeGuest?.pendingBills?.map(bill => (
+                    <div key={bill._id} className="flex items-center justify-between rounded-lg border border-slate-100 bg-white p-2.5">
+                      <div>
+                        <p className="text-[12px] font-bold text-slate-700">Room Bill #{bill.billNo}</p>
+                        <p className="text-[10px] text-brand-muted">
+                          Room: {bill.roomNumber || bill.roomId?.roomNumber || 'N/A'} &bull; {bill.guestName}
+                        </p>
+                        {bill.checkIn && (
+                          <p className="text-[10px] text-brand-muted">
+                            {new Date(bill.checkIn).toLocaleDateString()} → {bill.checkOut ? new Date(bill.checkOut).toLocaleDateString() : 'Active'}
+                          </p>
+                        )}
+                      </div>
+                      <span className="ml-3 shrink-0 font-black text-rose-600 text-[13px]">Rs. {bill.totalDue?.toLocaleString()}</span>
+                    </div>
+                  ))}
+                  {activeGuest?.pendingOrders?.map(order => (
+                    <div key={order._id} className="flex items-center justify-between rounded-lg border border-blue-100 bg-blue-50 p-2.5">
+                      <div>
+                        <p className="text-[12px] font-bold text-blue-700">Restaurant Order #{order._id?.slice(-5).toUpperCase()}</p>
+                        <p className="text-[10px] text-blue-500">
+                          {order.items?.map(i => `${i.name} x${i.quantity}`).join(', ').slice(0, 50) || 'Restaurant charges'}
+                          {order.items?.length > 2 ? '…' : ''}
+                        </p>
+                        <p className="text-[10px] text-blue-500">{new Date(order.createdAt).toLocaleDateString()}</p>
+                      </div>
+                      <span className="ml-3 shrink-0 font-black text-blue-700 text-[13px]">Rs. {order.totalAmount?.toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div>
                 <label className="label">Payment Amount (Rs.)</label>
@@ -379,7 +431,7 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
                         required
                     />
                 </div>
-                {Number(paymentAmount) < activeGuest?.totalDue && (
+                {Number(paymentAmount) < activeGuest?.totalDue && Number(paymentAmount) > 0 && (
                     <p className="text-[11px] font-bold text-amber-600 mt-2 italic px-1">
                         * Remaining due after this payment: Rs. {(activeGuest.totalDue - Number(paymentAmount)).toLocaleString()}
                     </p>

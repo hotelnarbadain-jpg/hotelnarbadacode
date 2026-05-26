@@ -28,6 +28,7 @@ import ReceptionRoomPage from './pages/reception/ReceptionRoomPage';
 import ReceptionCheckoutPage from './pages/reception/ReceptionCheckoutPage';
 import ReceptionDuesPage from './pages/reception/ReceptionDuesPage';
 import MaintenancePage from './pages/reception/MaintenancePage';
+import ShiftBalancePage from './pages/reception/ShiftBalancePage';
 
 // Import Housekeeping Pages
 import HousekeepingDashboardPage from './pages/housekeeping/HousekeepingDashboardPage';
@@ -208,6 +209,7 @@ export default function App() {
                 <Route path="guest-management" element={<ReceptionGuestPage api={api} updateTrigger={updateTrigger} />} />
                 <Route path="checkout-management" element={<ReceptionCheckoutPage api={api} updateTrigger={updateTrigger} />} />
                 <Route path="dues-management" element={<ReceptionDuesPage api={api} updateTrigger={updateTrigger} />} />
+                <Route path="shift-balance" element={<ShiftBalancePage api={api} updateTrigger={updateTrigger} />} />
                 <Route path="bills-management" element={<BillsManagementPage api={api} updateTrigger={updateTrigger} />} />
                 <Route path="room-management" element={<ReceptionRoomPage api={api} updateTrigger={updateTrigger} />} />
                 <Route path="inventory-portal" element={<InventoryPage api={api} updateTrigger={updateTrigger} />} />

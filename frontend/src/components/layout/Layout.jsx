@@ -34,6 +34,7 @@ const receptionNavItems = [
   ['Sahakari Management', '/reception/sahakari-management', faWallet],
   ['Checkout Management', '/reception/checkout-management', faMoneyCheckDollar],
   ['Dues Management', '/reception/dues-management', faWallet],
+  ['Shift Balance', '/reception/shift-balance', faMoneyBillWave],
   ['Bills Management', '/reception/bills-management', faFileInvoiceDollar],
   ['Room Management', '/reception/room-management', faBed],
   ['Inventory Portal', '/reception/inventory-portal', faWarehouse],

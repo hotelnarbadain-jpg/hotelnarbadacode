@@ -26,6 +26,10 @@ export default function FinancialPage({ api, updateTrigger }) {
   const [form, setForm] = useState(initialForm);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  
+  // Filters State
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
 
   const load = async () => {
     if (rows.length === 0) setLoading(true);
@@ -43,13 +47,20 @@ export default function FinancialPage({ api, updateTrigger }) {
 
   const chartData = useMemo(() => {
     const dailyData = {};
+    let othersExpense = 0;
+    let inventoryExpense = 0;
+    let salaryExpense = 0;
 
     // Process manual entries
     rows.forEach(row => {
       const date = new Date(row.date).toISOString().slice(0, 10);
       if (!dailyData[date]) dailyData[date] = { date, income: 0, expense: 0 };
-      if (row.type === 'Income') dailyData[date].income += Number(row.amount || 0);
-      else dailyData[date].expense += Number(row.amount || 0);
+      if (row.type === 'Income') {
+        dailyData[date].income += Number(row.amount || 0);
+      } else {
+        dailyData[date].expense += Number(row.amount || 0);
+        othersExpense += Number(row.amount || 0);
+      }
     });
 
     // Process purchases (Expense)
@@ -57,14 +68,17 @@ export default function FinancialPage({ api, updateTrigger }) {
       const date = new Date(p.date).toISOString().slice(0, 10);
       if (!dailyData[date]) dailyData[date] = { date, income: 0, expense: 0 };
       dailyData[date].expense += Number(p.totalAmount || 0);
+      inventoryExpense += Number(p.totalAmount || 0);
     });
 
     // Process salaries (Expense)
     salaries.forEach(s => {
-      if (s.paidDate) {
-        const date = new Date(s.paidDate).toISOString().slice(0, 10);
+      const dateSource = s.createdAt || s.paymentDate;
+      if (dateSource) {
+        const date = new Date(dateSource).toISOString().slice(0, 10);
         if (!dailyData[date]) dailyData[date] = { date, income: 0, expense: 0 };
         dailyData[date].expense += Number(s.netSalary || 0);
+        salaryExpense += Number(s.netSalary || 0);
       }
     });
 
@@ -78,8 +92,66 @@ export default function FinancialPage({ api, updateTrigger }) {
       { name: 'Total Expense', value: totalExpense, color: '#f43f5e' },
     ];
 
-    return { timeline, pieData, totalIncome, totalExpense };
+    return { timeline, pieData, totalIncome, totalExpense, inventoryExpense, salaryExpense, othersExpense };
   }, [rows, purchases, salaries]);
+
+  const allStatements = useMemo(() => {
+    const list = [];
+    
+    // 1. Manual financials
+    rows.forEach(r => {
+      list.push({
+        _id: r._id,
+        title: r.title,
+        date: r.date,
+        type: r.type,
+        category: r.type === 'Expense' ? 'Others' : 'Income',
+        amount: r.amount,
+        isManual: true,
+        original: r
+      });
+    });
+    
+    // 2. Purchases
+    purchases.forEach(p => {
+      list.push({
+        _id: p._id,
+        title: `Inventory Purchase - Invoice #${p.invoiceNo} (${p.supplierId?.name || 'Unknown Supplier'})`,
+        date: p.date,
+        type: 'Expense',
+        category: 'Inventory',
+        amount: p.totalAmount,
+        isManual: false,
+        original: p
+      });
+    });
+    
+    // 3. Paid Salaries
+    salaries.forEach(s => {
+      list.push({
+        _id: s._id,
+        title: `Salary Paid - ${s.staff?.name || 'Unknown Staff'} (${s.month} ${s.year})`,
+        date: s.createdAt || s.paymentDate || new Date().toISOString(),
+        type: 'Expense',
+        category: 'Salary',
+        amount: s.netSalary,
+        isManual: false,
+        original: s
+      });
+    });
+    
+    return list.sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [rows, purchases, salaries]);
+
+  const filteredStatements = useMemo(() => {
+    return allStatements.filter(item => {
+      if (typeFilter !== 'all' && item.type !== typeFilter) return false;
+      if (categoryFilter !== 'all') {
+        if (item.category.toLowerCase() !== categoryFilter.toLowerCase()) return false;
+      }
+      return true;
+    });
+  }, [allStatements, typeFilter, categoryFilter]);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -124,9 +196,25 @@ export default function FinancialPage({ api, updateTrigger }) {
           <p className="text-[12px] font-bold uppercase tracking-wider text-brand-muted">Total Income</p>
           <h3 className="mt-2 text-[30px] font-black text-green-600 tracking-tight">Rs. {chartData.totalIncome.toLocaleString()}</h3>
         </div>
-        <div className="card p-5 border-l-4 border-l-rose-500 shadow-sm">
-          <p className="text-[12px] font-bold uppercase tracking-wider text-brand-muted">Total Expense</p>
-          <h3 className="mt-2 text-[30px] font-black text-rose-600 tracking-tight">Rs. {chartData.totalExpense.toLocaleString()}</h3>
+        <div className="card p-5 border-l-4 border-l-rose-500 shadow-sm flex flex-col justify-between">
+          <div>
+            <p className="text-[12px] font-bold uppercase tracking-wider text-brand-muted">Total Expense</p>
+            <h3 className="mt-2 text-[30px] font-black text-rose-600 tracking-tight">Rs. {chartData.totalExpense.toLocaleString()}</h3>
+          </div>
+          <div className="mt-3 border-t border-rose-100 pt-2 text-[11.5px] text-brand-muted space-y-1">
+            <div className="flex justify-between">
+              <span>Inventory expenses:</span>
+              <span className="font-bold text-rose-600">Rs. {chartData.inventoryExpense.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Salary expense:</span>
+              <span className="font-bold text-rose-600">Rs. {chartData.salaryExpense.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Others:</span>
+              <span className="font-bold text-rose-600">Rs. {chartData.othersExpense.toLocaleString()}</span>
+            </div>
+          </div>
         </div>
         <div className="card p-5 border-l-4 border-l-brand-blue shadow-sm">
           <p className="text-[12px] font-bold uppercase tracking-wider text-brand-muted">Net Cashflow</p>
@@ -209,8 +297,41 @@ export default function FinancialPage({ api, updateTrigger }) {
         </div>
       ) : (
         <div className="card overflow-hidden shadow-sm">
-          <div className="bg-slate-50 px-6 py-4 border-b border-brand-border flex justify-between items-center">
+          <div className="bg-slate-50 px-6 py-4 border-b border-brand-border flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <h4 className="text-[15px] font-bold uppercase tracking-widest text-brand-muted">Financial Statements</h4>
+            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+              <div className="flex items-center gap-2">
+                <label className="text-[12px] font-bold uppercase tracking-wider text-brand-muted">Type:</label>
+                <select 
+                  className="input !h-9 !py-1 !px-3 font-semibold !w-32" 
+                  value={typeFilter} 
+                  onChange={(e) => { 
+                    setTypeFilter(e.target.value); 
+                    if (e.target.value === 'Income') setCategoryFilter('all'); 
+                  }}
+                >
+                  <option value="all">All Types</option>
+                  <option value="Income">Income</option>
+                  <option value="Expense">Expense</option>
+                </select>
+              </div>
+              
+              {typeFilter !== 'Income' && (
+                <div className="flex items-center gap-2">
+                  <label className="text-[12px] font-bold uppercase tracking-wider text-brand-muted">Category:</label>
+                  <select 
+                    className="input !h-9 !py-1 !px-3 font-semibold !w-36" 
+                    value={categoryFilter} 
+                    onChange={(e) => setCategoryFilter(e.target.value)}
+                  >
+                    <option value="all">All Categories</option>
+                    <option value="Salary">Salary</option>
+                    <option value="Inventory">Inventory</option>
+                    <option value="Others">Others</option>
+                  </select>
+                </div>
+              )}
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[620px] text-left text-[13px]">
@@ -219,44 +340,54 @@ export default function FinancialPage({ api, updateTrigger }) {
                   <th className="p-4 font-semibold">Title</th>
                   <th className="font-semibold">Date</th>
                   <th className="font-semibold">Type</th>
+                  <th className="font-semibold">Category</th>
                   <th className="font-semibold">Amount</th>
                   <th className="p-4 text-right font-semibold">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
-                  <tr key={row._id} className="border-t border-brand-border hover:bg-slate-50 transition-colors">
-                    <td className="p-4 font-medium">{row.title}</td>
-                    <td>{new Date(row.date).toLocaleDateString()}</td>
+                {filteredStatements.map((item) => (
+                  <tr key={item._id} className="border-t border-brand-border hover:bg-slate-50 transition-colors">
+                    <td className="p-4 font-medium">{item.title}</td>
+                    <td>{new Date(item.date).toLocaleDateString()}</td>
                     <td>
-                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-bold ${row.type === 'Income' ? 'bg-green-100 text-green-700' : 'bg-rose-100 text-rose-700'}`}>
-                        {row.type.toUpperCase()}
+                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-bold ${item.type === 'Income' ? 'bg-green-100 text-green-700' : 'bg-rose-100 text-rose-700'}`}>
+                        {item.type.toUpperCase()}
                       </span>
                     </td>
-                    <td className="font-black text-brand-text">Rs. {row.amount.toLocaleString()}</td>
-                    <td className="p-4">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          className="btn-secondary !h-9 !px-3"
-                          onClick={() => {
-                            setEditing(row);
-                            setForm({ ...row, amount: row.amount || '', date: row.date?.slice(0, 10) || '' });
-                            setModalOpen(true);
-                          }}
-                        >
-                          <FontAwesomeIcon icon={faPen} />
-                        </button>
-                        <button className="btn-danger !h-9" onClick={() => setConfirmDelete(row)}>
-                          <FontAwesomeIcon icon={faTrash} />
-                        </button>
-                      </div>
+                    <td>
+                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-bold ${item.category === 'Salary' ? 'bg-blue-100 text-blue-700' : item.category === 'Inventory' ? 'bg-amber-100 text-amber-700' : item.category === 'Others' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-700'}`}>
+                        {item.category}
+                      </span>
+                    </td>
+                    <td className="font-black text-brand-text">Rs. {item.amount.toLocaleString()}</td>
+                    <td className="p-4 text-right">
+                      {item.isManual ? (
+                        <div className="flex justify-end gap-2">
+                          <button
+                            className="btn-secondary !h-9 !px-3"
+                            onClick={() => {
+                              setEditing(item.original);
+                              setForm({ ...item.original, amount: item.amount || '', date: item.date?.slice(0, 10) || '' });
+                              setModalOpen(true);
+                            }}
+                          >
+                            <FontAwesomeIcon icon={faPen} />
+                          </button>
+                          <button className="btn-danger !h-9" onClick={() => setConfirmDelete(item.original)}>
+                            <FontAwesomeIcon icon={faTrash} />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] font-bold text-brand-muted bg-slate-100 px-2.5 py-1 rounded-full uppercase tracking-wider">System Generated</span>
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {rows.length === 0 && <div className="py-20 text-center text-brand-muted">No financial entries found.</div>}
+          {filteredStatements.length === 0 && <div className="py-20 text-center text-brand-muted">No financial entries found.</div>}
         </div>
       )}
       <Modal open={modalOpen} title={editing ? 'Update Bill' : 'Create Bill'} onClose={() => !submitting && setModalOpen(false)} width="520px">

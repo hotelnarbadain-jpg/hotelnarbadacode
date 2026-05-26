@@ -248,6 +248,7 @@ export default function StaffPage({ api, updateTrigger }) {
                   <option>Waiter</option>
                   <option>Kitchen</option>
                   <option>Housekeeping</option>
+                  <option>Security Guard</option>
                 </select>
               </div>
               <div>

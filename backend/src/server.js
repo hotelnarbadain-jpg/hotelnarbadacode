@@ -26,6 +26,7 @@ import guestRoutes from './routes/guestRoutes.js';
 import billRoutes from './routes/billRoutes.js';
 import purchaseRoutes from './routes/purchaseRoutes.js';
 import restaurantOrderRoutes from './routes/restaurantOrderRoutes.js';
+import shiftSessionRoutes from './routes/shiftSessionRoutes.js';
 import InventoryItem from './models/InventoryItem.js';
 import RestaurantCategory from './models/RestaurantCategory.js';
 import RestaurantTable from './models/RestaurantTable.js';
@@ -75,6 +76,7 @@ app.use('/api/suppliers', createCrudRouter(Supplier));
 app.use('/api/purchases', purchaseRoutes);
 app.use('/api/room-categories', createCrudRouter(RoomCategory));
 app.use('/api/deposit-types', createCrudRouter(SahakariDepositType));
+app.use('/api/shift-sessions', shiftSessionRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
