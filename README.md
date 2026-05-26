@@ -42,13 +42,7 @@ npm run dev
 ## Environment files
 Pre-filled `.env` files are included for convenience.
 
-Backend `.env`:
-```env
-PORT=5000
-CLIENT_URL=http://localhost:5173
-MONGO_URI=mongodb+srv://hotelnarvada:12345@cluster0.w8jmld9.mongodb.net/hotel_narvada_v2?retryWrites=true&w=majority&appName=Cluster0
-JWT_SECRET=hotel_narvada_super_secret_v2
-```
+
 
 Frontend `.env`:
 ```env
