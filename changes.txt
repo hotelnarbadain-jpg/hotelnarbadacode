@@ -1,0 +1,6 @@
+bill management 
+bill modification for edit feature not showing the updated bill status on the bill for partial payment 
+
+
+
+waiter page & kitchen page

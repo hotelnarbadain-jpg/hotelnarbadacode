@@ -1,0 +1,122 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  font-size: 14px;
+}
+
+body {
+  @apply bg-[#f4f6fb] text-brand-text font-poppins antialiased;
+}
+
+* {
+  scrollbar-width: thin;
+}
+
+input, button, select, textarea {
+  font-family: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.card {
+  @apply rounded-[18px] border border-brand-border bg-white shadow-soft;
+}
+
+.input {
+  @apply h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[13px] outline-none transition placeholder:text-slate-400 focus:border-brand-blue;
+}
+
+.textarea {
+  @apply w-full rounded-xl border border-brand-border bg-white px-4 py-3 text-[13px] outline-none transition placeholder:text-slate-400 focus:border-brand-blue;
+}
+
+.btn-primary {
+  @apply inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-brand-blue px-5 text-[13px] font-semibold text-white transition hover:brightness-95;
+}
+
+.btn-secondary {
+  @apply inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-brand-border bg-white px-5 text-[13px] font-semibold text-brand-text transition hover:bg-slate-50;
+}
+
+.btn-success {
+  @apply inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-green-600 px-5 text-[13px] font-semibold text-white transition hover:brightness-95;
+}
+
+.btn-danger {
+  @apply inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 text-[12px] font-semibold text-white transition hover:brightness-95;
+}
+
+.label {
+  @apply mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-brand-muted;
+}
+
+.modal-backdrop {
+  @apply fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-[1px];
+}
+
+.modal-panel {
+  @apply fixed left-1/2 top-1/2 z-50 w-[min(96vw,760px)] -translate-x-1/2 -translate-y-1/2 rounded-[20px] border border-brand-border bg-white shadow-[0_18px_80px_rgba(15,23,42,0.18)];
+}
+
+.nav-pill {
+  @apply flex items-center gap-3 rounded-2xl px-4 py-3 text-[13px] font-medium transition;
+}
+
+.tab-btn {
+  @apply inline-flex h-12 items-center gap-2 rounded-xl px-5 text-[13px] font-semibold;
+}
+
+.stat-value {
+  @apply text-[30px] font-extrabold tracking-tight;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  @apply h-10 w-10 animate-[spin_1s_linear_infinite] rounded-full border-4 border-slate-200 border-t-brand-blue;
+}
+
+/* Animated Hamburger */
+.hamburger-box {
+  @apply relative flex flex-col justify-between w-5 h-4 cursor-pointer transition-all duration-300;
+}
+
+.hamburger-line {
+  @apply w-full h-[2px] bg-white rounded-full transition-all duration-300 origin-[1px];
+}
+
+.hamburger-box.open .line-1 {
+  @apply rotate-[45deg];
+}
+
+.hamburger-box.open .line-2 {
+  @apply opacity-0 translate-x-2;
+}
+
+.hamburger-box.open .line-3 {
+  @apply rotate-[-45deg];
+}
+
+@keyframes bounce-subtle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.animate-bounce-subtle {
+  animation: bounce-subtle 3s ease-in-out infinite;
+}
