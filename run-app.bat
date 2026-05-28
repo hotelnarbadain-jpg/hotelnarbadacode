@@ -44,7 +44,7 @@ timeout /t 6 /nobreak > nul
 :: Open App in Chrome
 :: =====================================
 echo Opening app in browser...
-start chrome http://192.168.101.6:5173/
+start chrome http://192.168.101.3:5173/
 
 echo App is starting in separate windows...
 pause

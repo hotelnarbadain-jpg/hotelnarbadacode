@@ -64,18 +64,21 @@ export default function ReceptionCheckoutPage({ api, updateTrigger }) {
 
       const checkedInGuests = guestRows.filter(g => g.status === 'Checked In');
       
-      // Collect all room numbers assigned to active guests
+      // Collect all room numbers assigned to active checked-in guests
       const guestRoomNos = new Set();
       checkedInGuests.forEach(g => {
         if (g.rooms && g.rooms.length > 0) {
-          g.rooms.forEach(r => guestRoomNos.add(r.roomNo));
+          g.rooms.forEach(r => { if (r.roomNo) guestRoomNos.add(r.roomNo.toString().trim()); });
         } else if (g.roomNo) {
-          g.roomNo.split(', ').forEach(rn => guestRoomNos.add(rn.trim()));
+          g.roomNo.split(',').forEach(rn => { if (rn.trim()) guestRoomNos.add(rn.trim()); });
         }
       });
 
-      // Show rooms that are either marked 'Occupied' OR assigned to a checked-in guest
-      setRooms(roomRows.filter(r => r.status === 'Occupied' || guestRoomNos.has(r.roomNo)));
+      // Show rooms that are 'Occupied' OR are assigned to a checked-in guest
+      // (covers cases where room status may be Dirty/Cleaning but guest is still active)
+      setRooms(roomRows.filter(r =>
+        r.status === 'Occupied' || guestRoomNos.has((r.roomNo || '').toString().trim())
+      ));
       setAllGuests(checkedInGuests);
       setProfile(hotelProfile);
       setInventoryItems(itemRows.filter(i => i.showInCheckout !== false));
@@ -99,18 +102,25 @@ export default function ReceptionCheckoutPage({ api, updateTrigger }) {
     const room = rooms.find(r => r._id === roomId);
     if (!room) return;
 
-    const guest = allGuests.find(g => 
-      (g.rooms || []).some(rg => rg.roomNo === room.roomNo) || 
-      g.roomNo === room.roomNo ||
-      (g.roomNo && g.roomNo.split(', ').includes(room.roomNo))
-    );
-    setSelectedGuest(guest);
+    // Robust matching: compare room numbers as trimmed strings on both sides
+    const rNo = (room.roomNo || '').toString().trim();
+    const guest = allGuests.find(g => {
+      if ((g.rooms || []).some(rg => (rg.roomNo || '').toString().trim() === rNo)) return true;
+      if ((g.roomNo || '').toString().trim() === rNo) return true;
+      if (g.roomNo && g.roomNo.split(',').map(s => s.trim()).includes(rNo)) return true;
+      return false;
+    });
+    setSelectedGuest(guest || null);
 
     if (guest) {
-        const roomOrders = restOrders.filter(o => String(o.guestId) === String(guest._id) && ['Room Charge', 'Credit'].includes(o.paymentMethod));
+        const guestIdStr = (guest._id || '').toString();
+        const roomOrders = restOrders.filter(o => {
+          const oGuestId = (o.guestId?._id || o.guestId || '').toString();
+          return oGuestId === guestIdStr && ['Room Charge', 'Credit'].includes(o.paymentMethod);
+        });
         const orderItems = [];
         roomOrders.forEach(order => {
-          order.items.forEach(item => {
+          (order.items || []).forEach(item => {
             orderItems.push({ 
               item: `Rest. Order #${order._id.slice(-4).toUpperCase()} - ${item.name}`, 
               qty: item.quantity, 

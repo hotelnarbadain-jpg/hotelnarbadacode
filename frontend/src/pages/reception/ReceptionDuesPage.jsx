@@ -37,6 +37,7 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [filterType, setFilterType] = useState('All');
   
   // Payment Modal State
   const [activeGuest, setActiveGuest] = useState(null);
@@ -49,83 +50,79 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
       // Add 1s delay for skeleton effect
       await new Promise(resolve => setTimeout(resolve, 1000));
       
-      const [allGuests, allBills, allOrders] = await Promise.all([
+      const [allGuests, allBills] = await Promise.all([
         api.fetchList('/guests'),
-        api.fetchList('/bills'),
-        api.fetchList('/restaurant-orders')
+        api.fetchList('/bills')
       ]);
 
       // Master Map to aggregate everything by guest
+      // Key: normalized name+phone
       const duesMap = new Map();
+
+      const normKey = (name, phone) => `${(name || '').toLowerCase().trim()}_${(phone || '').trim()}`;
 
       // 1. Add all guests who have a profile totalDue
       allGuests.forEach(g => {
         if ((g.totalDue || 0) > 0) {
-          duesMap.set(g._id.toString(), {
-            _id: g._id,
-            name: g.name,
-            phone: g.phone,
-            status: g.status,
-            totalDue: g.totalDue,
-            checkInDate: g.checkInDate,
-            createdAt: g.createdAt,
-            pendingBills: [],
-            pendingOrders: []
-          });
-        }
-      });
-
-      // 2. Add/Update from Bills
-      allBills.forEach(b => {
-        if ((b.totalDue || 0) > 0) {
-          const key = b.guestId?._id?.toString() || b.guestId?.toString() || `bill-name-${b.guestName}`;
+          const key = normKey(g.name, g.phone);
           if (duesMap.has(key)) {
             const existing = duesMap.get(key);
-            if (!existing.pendingBills.find(pb => pb._id === b._id)) {
-              existing.pendingBills.push(b);
+            existing.totalDue += g.totalDue;
+            existing.guestProfiles.push(g);
+            // Keep Checked In status if any profile has it
+            if (g.status === 'Checked In') {
+              existing.status = 'Checked In';
             }
           } else {
             duesMap.set(key, {
-              _id: b.guestId || key,
-              name: b.guestName || 'Unknown Guest',
-              phone: b.contactNo,
-              status: 'Bill Pending',
-              totalDue: b.totalDue,
-              checkInDate: b.checkIn,
-              createdAt: b.createdAt,
-              pendingBills: [b],
+              _id: g._id, // Hold primary ID
+              name: g.name,
+              phone: g.phone,
+              status: g.status,
+              totalDue: g.totalDue,
+              checkInDate: g.checkInDate,
+              createdAt: g.createdAt,
+              guestProfiles: [g],
+              pendingBills: [],
               pendingOrders: []
             });
           }
         }
       });
 
-      // 3. Add/Update from Restaurant Orders
-      allOrders.forEach(o => {
-        // A restaurant order is an independent due ONLY if it's 'Credit' and not yet paid.
-        // 'Room Charge' orders are consolidated into the room bill and handled there.
-        const isUnpaidCreditOrder = o.paymentMethod === 'Credit' && o.status === 'Completed';
-        
-        if (isUnpaidCreditOrder) {
-          const key = o.guestId?._id?.toString() || o.guestId?.toString() || `order-name-${o.guestName}`;
-          
+      // Helper: resolve the map key for a record that may or may not have a guestId
+      const resolveKey = (guestId, guestName, phone) => {
+        if (guestId) {
+          const id = guestId?._id?.toString() || guestId?.toString();
+          const g = allGuests.find(x => x._id.toString() === id);
+          if (g) return normKey(g.name, g.phone);
+        }
+        return normKey(guestName, phone);
+      };
+
+      // 2. Add/Update from Bills
+      allBills.forEach(b => {
+        if ((b.totalDue || 0) > 0) {
+          const key = resolveKey(b.guestId, b.guestName, b.contactNo);
           if (duesMap.has(key)) {
             const existing = duesMap.get(key);
-            if (!existing.pendingOrders.find(po => po._id === o._id)) {
-              existing.pendingOrders.push(o);
+            if (!existing.pendingBills.find(pb => pb._id === b._id)) {
+              existing.pendingBills.push(b);
             }
           } else {
-            duesMap.set(key, {
-              _id: o.guestId || key,
-              name: o.guestName || 'Restaurant Guest',
-              phone: 'N/A',
-              status: 'Credit Guest',
-              totalDue: o.totalAmount,
-              checkInDate: null,
-              createdAt: o.createdAt,
-              pendingBills: [],
-              pendingOrders: [o]
-            });
+            const entry = {
+              _id: b.guestId || `bill-name-${key}`,
+              name: b.guestName || 'Unknown Guest',
+              phone: b.contactNo,
+              status: 'Bill Pending',
+              totalDue: b.totalDue,
+              checkInDate: b.checkIn,
+              createdAt: b.createdAt,
+              guestProfiles: [],
+              pendingBills: [b],
+              pendingOrders: []
+            };
+            duesMap.set(key, entry);
           }
         }
       });
@@ -133,20 +130,19 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
       // 4. Convert map back to array and ensure totalDue reflects the breakdown accurately
       const processedGuests = Array.from(duesMap.values()).map(g => {
         const billTotal = g.pendingBills.reduce((sum, b) => sum + (Number(b.totalDue) || 0), 0);
-        const orderTotal = g.pendingOrders.reduce((sum, o) => sum + (Number(o.totalAmount) || 0), 0);
         
-        // Use the breakdown total for checked-out or credit guests.
-        // For Checked In guests, we use their current profile totalDue but ensure it's not less than their known bills/orders
-        let finalTotal = billTotal + orderTotal;
-        if (g.status === 'Checked In' && g.totalDue > finalTotal) {
-            finalTotal = g.totalDue;
+        let finalTotal = billTotal;
+
+        // Adjust status if checked in
+        let finalStatus = g.status;
+        const statuses = (g.guestProfiles || []).map(p => p.status);
+        if (statuses.includes('Checked In')) {
+          finalStatus = 'Checked In';
         }
 
-        return { ...g, totalDue: finalTotal };
+        return { ...g, totalDue: finalTotal, status: finalStatus };
       }).filter(g => {
         const name = g.name?.toLowerCase() || '';
-        // Remove 'Normal Person' and generic 'Restaurant Guest' as requested
-        // Keep 'Ghanashyam' and other specific guests
         if (name.includes('normal person') || name.includes('restaurant guest') || name === 'unknown guest') {
           return false;
         }
@@ -164,14 +160,46 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
 
   useEffect(() => { loadData(); }, [updateTrigger]);
 
-  const filteredGuests = guests.filter(g => 
-    g.name.toLowerCase().includes(search.toLowerCase()) || 
-    g.phone?.includes(search)
-  );
+  const displayedGuests = useMemo(() => {
+    return guests
+      .map(g => {
+        // Calculate Room Dues breakdown and totals
+        const roomBills = g.pendingBills || [];
+        const billTotal = roomBills.reduce((sum, b) => sum + (Number(b.totalDue) || 0), 0);
+
+        // Determine which fields are displayed and what the total due is
+        let finalDue = g.totalDue;
+        let finalBills = g.pendingBills;
+
+        if (filterType === 'Room') {
+          finalDue = billTotal;
+          finalBills = roomBills;
+        } else if (filterType === 'Restaurant') {
+          finalDue = 0;
+          finalBills = [];
+        }
+
+        return {
+          ...g,
+          totalDue: finalDue,
+          pendingBills: finalBills,
+          guestProfiles: g.guestProfiles
+        };
+      })
+      .filter(g => {
+        // If the total due under this filter is 0 or less, hide this guest
+        if (g.totalDue <= 0) return false;
+
+        // Apply search filter
+        const matchesSearch = g.name.toLowerCase().includes(search.toLowerCase()) || 
+                              g.phone?.includes(search);
+        return matchesSearch;
+      });
+  }, [guests, filterType, search]);
 
   const totalDues = useMemo(() => {
-    return guests.reduce((sum, g) => sum + (Number(g.totalDue) || 0), 0);
-  }, [guests]);
+    return displayedGuests.reduce((sum, g) => sum + (Number(g.totalDue) || 0), 0);
+  }, [displayedGuests]);
 
   const openPayment = (guest) => {
     setActiveGuest(guest);
@@ -190,14 +218,21 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
       const amountToPay = Number(paymentAmount);
       let remainingPayment = amountToPay;
       
-      // 1. Update Guest Due (Only for real hotel guests)
-      const isRealGuest = activeGuest.status !== 'Credit Guest' && !activeGuest._id.toString().startsWith('bill-name-') && !activeGuest._id.toString().startsWith('order-name-');
-      
-      if (isRealGuest) {
-        const newGuestDue = Math.max(0, (activeGuest.totalDue || 0) - amountToPay);
-        await api.updateItem('/guests', activeGuest._id, {
-          totalDue: newGuestDue
-        });
+      // 1. Update Guest Dues (Sequentially deduct from matching guest profiles)
+      if (activeGuest.guestProfiles && activeGuest.guestProfiles.length > 0) {
+        let remainingGuestDuePay = amountToPay;
+        for (const gp of activeGuest.guestProfiles) {
+          if (remainingGuestDuePay <= 0) break;
+          const gpDue = gp.totalDue || 0;
+          if (gpDue > 0) {
+            const paymentForThisProfile = Math.min(gpDue, remainingGuestDuePay);
+            const newGpDue = Math.max(0, gpDue - paymentForThisProfile);
+            await api.updateItem('/guests', gp._id, {
+              totalDue: newGpDue
+            });
+            remainingGuestDuePay -= paymentForThisProfile;
+          }
+        }
       }
 
       // 2. Record Financial Entry
@@ -210,8 +245,14 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
 
       // 3. Update related bills (Handle multiple bills if any)
       const allBills = await api.fetchList('/bills');
+      const activeNp = normKey(activeGuest.name, activeGuest.phone);
       const guestBills = allBills
-        .filter(b => (b.guestId?._id || b.guestId) === activeGuest._id && (b.totalDue || 0) > 0)
+        .filter(b => {
+          if ((b.totalDue || 0) <= 0) return false;
+          const bGuestId = (b.guestId?._id || b.guestId || '').toString();
+          if (bGuestId && activeGuest.guestProfiles?.some(gp => gp._id.toString() === bGuestId)) return true;
+          return normKey(b.guestName, b.contactNo) === activeNp;
+        })
         .sort((a, b) => new Date(a.date) - new Date(b.date)); // Pay oldest bills first
 
       for (const bill of guestBills) {
@@ -234,24 +275,7 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
         remainingPayment -= paymentForThisBill;
       }
 
-      // 4. Update related restaurant orders (Credit orders)
-      const allOrders = await api.fetchList('/restaurant-orders');
-      const guestOrders = allOrders
-        .filter(o => {
-          const key = o.guestId?._id?.toString() || o.guestId?.toString() || `order-name-${o.guestName}`;
-          return key === activeGuest._id.toString() && o.paymentMethod === 'Credit' && o.status === 'Completed';
-        })
-        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-
-      for (const order of guestOrders) {
-        if (remainingPayment <= 0) break;
-        if (remainingPayment >= order.totalAmount) {
-          await api.updateItem('/restaurant-orders', order._id, { paymentMethod: 'Cash' });
-          remainingPayment -= order.totalAmount;
-        }
-      }
-
-      notifySuccess(`Payment of Rs. ${amountToPay.toLocaleString()} received and applied to bills/orders`);
+      notifySuccess(`Payment of Rs. ${amountToPay.toLocaleString()} received and applied to bills`);
       setActiveGuest(null);
       loadData();
     } catch (err) {
@@ -275,10 +299,10 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
           <h3 className="mt-2 text-[26px] font-black text-rose-600 tracking-tight">Rs. {totalDues.toLocaleString()}</h3>
         </div>
         <div className="card p-5 border-l-4 border-l-brand-blue shadow-sm md:col-span-2 flex flex-col justify-center">
-          <label className="text-[12px] font-bold uppercase tracking-wider text-brand-muted mb-2">Search Guest</label>
+          <label className="text-[12px] font-bold uppercase tracking-wider text-brand-muted mb-2 block">Search Guest</label>
           <div className="relative w-full">
             <FontAwesomeIcon icon={faSearch} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-muted" />
-            <input className="input !pl-11 !h-11 font-semibold" placeholder="Search by guest name or phone..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input className="input !pl-11 !h-11 font-semibold w-full" placeholder="Search by guest name or phone..." value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
         </div>
       </div>
@@ -289,9 +313,9 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {filteredGuests.map((guest) => (
-            <div key={guest._id} className="card group overflow-hidden transition-all hover:shadow-lg border-rose-100 bg-gradient-to-br from-white to-rose-50/20">
-               <div className="p-6">
+          {displayedGuests.map((guest) => (
+            <div key={guest._id} className="card group overflow-hidden transition-all hover:shadow-lg border-rose-100 bg-gradient-to-br from-white to-rose-50/20 flex flex-col h-full">
+               <div className="p-6 flex flex-col h-full">
                   <div className="flex items-center justify-between mb-4">
                      <div className="grid h-12 w-12 place-content-center rounded-2xl bg-rose-100 text-rose-600 transition-transform group-hover:scale-110">
                         <FontAwesomeIcon icon={faUser} className="text-[20px]" />
@@ -321,38 +345,77 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
                   </div>
 
                   {/* Breakdown Section */}
-                  <div className="mt-4 pt-3 border-t border-dashed border-brand-border space-y-2">
+                  <div className="mt-4 pt-3 border-t border-dashed border-brand-border space-y-2 flex-1 overflow-y-auto max-h-[250px] pr-2 scrollbar-thin scrollbar-thumb-rose-200 scrollbar-track-transparent">
                     <p className="text-[10px] font-black uppercase text-brand-muted mb-2">Source of Due</p>
-                    
+
                     {guest.pendingBills?.map(bill => (
-                      <div key={bill._id} className="flex justify-between items-center bg-slate-50 p-2 rounded-lg text-[11px] font-bold border border-slate-100">
-                        <span className="text-slate-600 truncate max-w-[120px]">Room Bill #{bill.billNo}</span>
-                        <span className="text-rose-600">Rs. {bill.totalDue?.toLocaleString()}</span>
+                      <div key={bill._id} className="flex flex-col bg-slate-50 p-3 rounded-lg text-[11px] font-bold border border-slate-200 shadow-sm">
+                        <div className="flex justify-between items-center w-full mb-2">
+                          <span className="text-slate-800 text-[12px]">Bill No: {bill.billNo}</span>
+                          <span className="text-rose-600 text-[12px]">Rs. {bill.totalDue?.toLocaleString()}</span>
+                        </div>
+                        
+                        {(bill.rooms?.length > 0 || bill.roomNo) && (
+                           <div className="mt-1">
+                              <div className="grid grid-cols-4 gap-1 border-b border-slate-200 pb-1 mb-1 text-slate-500 text-[9px] uppercase tracking-wider">
+                                 <div className="col-span-2">Room</div>
+                                 <div className="text-right">Price</div>
+                                 <div className="text-right">Total</div>
+                              </div>
+                              {bill.rooms?.length > 0 ? (
+                                bill.rooms.map((r, i) => (
+                                  <div key={i} className="grid grid-cols-4 gap-1 text-[10px] font-medium text-slate-700 py-0.5">
+                                    <div className="col-span-2 truncate pr-1">Rm: {r.roomNo}</div>
+                                    <div className="text-right">{r.price?.toLocaleString()}</div>
+                                    <div className="text-right">{r.total?.toLocaleString()}</div>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="grid grid-cols-4 gap-1 text-[10px] font-medium text-slate-700 py-0.5">
+                                  <div className="col-span-4 truncate">Rm: {bill.roomNo}</div>
+                                </div>
+                              )}
+                           </div>
+                        )}
+
+                        {bill.restaurantItems?.length > 0 && (
+                           <div className="mt-2">
+                              <div className="grid grid-cols-5 gap-1 border-b border-slate-200 pb-1 mb-1 text-slate-500 text-[9px] uppercase tracking-wider">
+                                 <div className="col-span-2">Items</div>
+                                 <div className="text-right">Qty</div>
+                                 <div className="text-right">Price</div>
+                                 <div className="text-right">Total</div>
+                              </div>
+                              {bill.restaurantItems.map((item, i) => (
+                                <div key={i} className="grid grid-cols-5 gap-1 text-[10px] font-medium text-slate-700 py-0.5">
+                                  <div className="col-span-2 truncate pr-1" title={item.item}>
+                                    {item.item.replace(/^Rest\. Order #[A-Za-z0-9]+ - /, '')}
+                                  </div>
+                                  <div className="text-right">{item.qty}</div>
+                                  <div className="text-right">{item.price?.toLocaleString()}</div>
+                                  <div className="text-right">{item.total?.toLocaleString()}</div>
+                                </div>
+                              ))}
+                           </div>
+                        )}
                       </div>
                     ))}
 
-                    {guest.pendingOrders?.map(order => (
-                      <div key={order._id} className="flex justify-between items-center bg-blue-50 p-2 rounded-lg text-[11px] font-bold border border-blue-100">
-                        <span className="text-blue-700 truncate max-w-[120px]">Rest. Order #{order._id.slice(-5).toUpperCase()}</span>
-                        <span className="text-blue-800">Rs. {order.totalAmount?.toLocaleString()}</span>
-                      </div>
-                    ))}
-
-                    {!guest.pendingBills?.length && !guest.pendingOrders?.length && (
+                    {!guest.pendingBills?.length && (
                       <p className="text-[11px] italic text-brand-muted text-center py-1">Direct Adjustment / Manual Due</p>
                     )}
                   </div>
 
                   <button 
                     onClick={() => openPayment(guest)}
-                    className="btn-primary w-full mt-6 !h-12 flex items-center justify-center gap-2.5 text-[14px] font-black uppercase tracking-widest shadow-lg shadow-brand-blue/20 active:scale-95 transition-all"
+                    className="btn-primary w-full mt-6 !h-12 flex items-center justify-center gap-2.5 text-[14px] font-black uppercase tracking-widest shadow-lg shadow-brand-blue/20 active:scale-95 transition-all mt-auto shrink-0"
                   >
                     <FontAwesomeIcon icon={faMoneyBillWave} /> Clear Due
                   </button>
                </div>
             </div>
           ))}
-          {filteredGuests.length === 0 && (
+          {displayedGuests.length === 0 && (
             <div className="col-span-full py-24 text-center">
                 <div className="inline-grid h-20 w-20 place-content-center rounded-full bg-slate-100 text-slate-300 mb-4">
                     <FontAwesomeIcon icon={faCheckCircle} size="2x" />
@@ -381,37 +444,67 @@ export default function ReceptionDuesPage({ api, updateTrigger }) {
             </div>
 
             {/* Itemized breakdown */}
-            {(activeGuest?.pendingBills?.length > 0 || activeGuest?.pendingOrders?.length > 0) && (
+            {(activeGuest?.pendingBills?.length > 0) && (
               <div className="rounded-xl border border-dashed border-brand-border bg-slate-50 p-4">
                 <p className="text-[10px] font-black uppercase tracking-widest text-brand-muted mb-3">Due Breakdown</p>
                 <div className="space-y-2">
                   {activeGuest?.pendingBills?.map(bill => (
-                    <div key={bill._id} className="flex items-center justify-between rounded-lg border border-slate-100 bg-white p-2.5">
-                      <div>
-                        <p className="text-[12px] font-bold text-slate-700">Room Bill #{bill.billNo}</p>
-                        <p className="text-[10px] text-brand-muted">
-                          Room: {bill.roomNumber || bill.roomId?.roomNumber || 'N/A'} &bull; {bill.guestName}
-                        </p>
-                        {bill.checkIn && (
-                          <p className="text-[10px] text-brand-muted">
-                            {new Date(bill.checkIn).toLocaleDateString()} → {bill.checkOut ? new Date(bill.checkOut).toLocaleDateString() : 'Active'}
-                          </p>
-                        )}
+                    <div key={bill._id} className="flex flex-col rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="flex items-start justify-between border-b border-slate-100 pb-3 mb-3">
+                        <div className="flex-1 min-w-0 pr-3">
+                          <p className="text-[14px] font-black text-slate-800">Bill No: {bill.billNo} <span className="text-[11px] text-brand-muted font-normal">({bill.guestName})</span></p>
+                          {bill.checkIn && (
+                            <p className="text-[10px] text-slate-400 mt-1">
+                              Stay: {new Date(bill.checkIn).toLocaleDateString()} → {bill.checkOut ? new Date(bill.checkOut).toLocaleDateString() : 'Active'}
+                            </p>
+                          )}
+                        </div>
+                        <span className="shrink-0 font-black text-rose-600 text-[15px]">Rs. {bill.totalDue?.toLocaleString()}</span>
                       </div>
-                      <span className="ml-3 shrink-0 font-black text-rose-600 text-[13px]">Rs. {bill.totalDue?.toLocaleString()}</span>
-                    </div>
-                  ))}
-                  {activeGuest?.pendingOrders?.map(order => (
-                    <div key={order._id} className="flex items-center justify-between rounded-lg border border-blue-100 bg-blue-50 p-2.5">
-                      <div>
-                        <p className="text-[12px] font-bold text-blue-700">Restaurant Order #{order._id?.slice(-5).toUpperCase()}</p>
-                        <p className="text-[10px] text-blue-500">
-                          {order.items?.map(i => `${i.name} x${i.quantity}`).join(', ').slice(0, 50) || 'Restaurant charges'}
-                          {order.items?.length > 2 ? '…' : ''}
-                        </p>
-                        <p className="text-[10px] text-blue-500">{new Date(order.createdAt).toLocaleDateString()}</p>
-                      </div>
-                      <span className="ml-3 shrink-0 font-black text-blue-700 text-[13px]">Rs. {order.totalAmount?.toLocaleString()}</span>
+                      
+                      {(bill.rooms?.length > 0 || bill.roomNo) && (
+                         <div className="mb-3">
+                            <div className="grid grid-cols-4 gap-2 border-b border-slate-100 pb-1.5 mb-1.5 text-slate-500 text-[10px] uppercase tracking-wider font-bold">
+                               <div className="col-span-2">Room</div>
+                               <div className="text-right">Price</div>
+                               <div className="text-right">Total</div>
+                            </div>
+                            {bill.rooms?.length > 0 ? (
+                              bill.rooms.map((r, i) => (
+                                <div key={i} className="grid grid-cols-4 gap-2 text-[11px] font-medium text-slate-700 py-1">
+                                  <div className="col-span-2 truncate pr-2">Rm: {r.roomNo}</div>
+                                  <div className="text-right">{r.price?.toLocaleString()}</div>
+                                  <div className="text-right">{r.total?.toLocaleString()}</div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="grid grid-cols-4 gap-2 text-[11px] font-medium text-slate-700 py-1">
+                                <div className="col-span-4 truncate">Rm: {bill.roomNo}</div>
+                              </div>
+                            )}
+                         </div>
+                      )}
+
+                      {bill.restaurantItems?.length > 0 && (
+                         <div>
+                            <div className="grid grid-cols-5 gap-2 border-b border-slate-100 pb-1.5 mb-1.5 text-slate-500 text-[10px] uppercase tracking-wider font-bold">
+                               <div className="col-span-2">Items</div>
+                               <div className="text-right">Qty</div>
+                               <div className="text-right">Price</div>
+                               <div className="text-right">Total</div>
+                            </div>
+                            {bill.restaurantItems.map((item, i) => (
+                              <div key={i} className="grid grid-cols-5 gap-2 text-[11px] font-medium text-slate-700 py-1 hover:bg-slate-50 rounded">
+                                <div className="col-span-2 truncate pr-2" title={item.item}>
+                                  {item.item.replace(/^Rest\. Order #[A-Za-z0-9]+ - /, '')}
+                                </div>
+                                <div className="text-right">{item.qty}</div>
+                                <div className="text-right">{item.price?.toLocaleString()}</div>
+                                <div className="text-right">{item.total?.toLocaleString()}</div>
+                              </div>
+                            ))}
+                         </div>
+                      )}
                     </div>
                   ))}
                 </div>

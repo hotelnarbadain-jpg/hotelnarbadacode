@@ -30,13 +30,36 @@ export default function ReceptionGuestPage({ api, updateTrigger }) {
         ]);
 
         const processedGuests = guestRes.map(g => {
-          const pendingBills = billRes.filter(b => (b.guestId?._id || b.guestId) === g._id && (b.totalDue || 0) > 0);
-          const pendingOrders = orderRes.filter(o => (o.guestId?._id || o.guestId) === g._id && o.paymentMethod === 'Credit' && o.status === 'Completed');
+          const gId = (g._id || '').toString();
+          const gName = (g.name || '').toLowerCase().trim();
+          const gPhone = (g.phone || '').trim();
+
+          // Match bills by guestId (string-safe) OR by name+phone fallback
+          const pendingBills = billRes.filter(b => {
+            if ((b.totalDue || 0) <= 0) return false;
+            const bGuestId = (b.guestId?._id || b.guestId || '').toString();
+            if (bGuestId && bGuestId === gId) return true;
+            // Fallback: match by name+phone when bill has no linked guestId
+            if (!bGuestId || bGuestId === 'undefined') {
+              return (
+                (b.guestName || '').toLowerCase().trim() === gName &&
+                gPhone && (b.contactNo || '').trim() === gPhone
+              );
+            }
+            return false;
+          });
+
+          // Match credit orders by guestId (string-safe)
+          const pendingOrders = orderRes.filter(o => {
+            const oGuestId = (o.guestId?._id || o.guestId || '').toString();
+            return oGuestId === gId && o.paymentMethod === 'Credit' && o.status === 'Completed';
+          });
           
           const billTotal = pendingBills.reduce((sum, b) => sum + (Number(b.totalDue) || 0), 0);
           const orderTotal = pendingOrders.reduce((sum, o) => sum + (Number(o.totalAmount) || 0), 0);
           
           let computedDue = billTotal + orderTotal;
+          // For currently checked-in guests, also respect their stored totalDue if higher
           if (g.status === 'Checked In' && (g.totalDue || 0) > computedDue) {
               computedDue = g.totalDue;
           }
